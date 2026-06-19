@@ -1,0 +1,13 @@
+*.o
+*.lnk
+*.uaem
+.DS_Store
+AmigaRobots
+PETRobots
+ArcadeRobots
+SharewareRobots
+DecompressData
+PETSCIIRobots.slave
+*.lha
+*.adf
+smakefile*
