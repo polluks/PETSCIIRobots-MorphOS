@@ -23,7 +23,7 @@ CFLAGS = -O2 -Wall -Wno-narrowing \
 	 -DPLATFORM_MAP_COUNT=14
 
 LDFLAGS =
-LIBS = -lauto -lxadmaster
+LIBS = -lauto
 
 OBJS = petrobots.o Platform.o PlatformMorphOS.o Palette.o
 

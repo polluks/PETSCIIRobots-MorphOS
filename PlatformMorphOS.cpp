@@ -15,7 +15,6 @@
 #include <classes/multimedia/multimedia.h>
 #include <proto/lowlevel.h>
 #include <libraries/lowlevel.h>
-#include <proto/xadmaster.h>
 #include <intuition/intuition.h>
 #include <graphics/gfx.h>
 #include <graphics/gfxbase.h>
@@ -53,46 +52,42 @@
 #define JPF_JOY_RIGHT      0x0800
 #endif
 
-// XAD decompression via xadmaster.library.
-static bool xadDecodeFile(const char* gzPath, uint8_t* destination, uint32_t size)
+// GZ decompression via Reggae gzip.demuxer pipeline.
+static bool gzDecodeFile(const char* gzPath, uint8_t* destination, uint32_t size)
 {
-    BPTR file = Open((STRPTR)gzPath, MODE_OLDFILE);
-    if (!file) return false;
+    if (!MultimediaBase) return false;
 
-    struct FileInfoBlock fib;
-    if (!ExamineFH(file, &fib)) { Close(file); return false; }
+    Object* stream = MediaNewObjectTags(
+        MMA_StreamType, (ULONG)"file.stream",
+        MMA_StreamName, (ULONG)gzPath,
+        MMA_MediaType, MMT_ANY,
+    TAG_END);
 
-    uint32_t csize = fib.fib_Size;
-    uint8_t* cbuf = (uint8_t*)AllocVec(csize, MEMF_CLEAR);
-    if (!cbuf) { Close(file); return false; }
+    if (!stream) return false;
 
-    Read(file, cbuf, csize);
-    Close(file);
+    Library* gzBase = OpenLibrary("multimedia/gzip.demuxer", 0);
+    if (!gzBase) { DisposeObject(stream); return false; }
 
-    struct xadArchiveInfo* arch = (struct xadArchiveInfo*)xadAllocObjectA(XADOBJ_ARCHIVEINFO, NULL);
-    if (!arch) { FreeVec(cbuf); return false; }
-
-    struct TagItem infoTags[3] = {
-        {XAD_INMEMORY, (ULONG)cbuf},
-        {XAD_INSIZE,   (ULONG)csize},
-        {TAG_DONE, 0}
-    };
+    Object* demuxer = NewObject(NULL, "gzip.demuxer", TAG_END);
+    if (!demuxer) { CloseLibrary(gzBase); DisposeObject(stream); return false; }
 
     bool ok = false;
-    if (xadGetInfoA(arch, infoTags) == XADERR_OK) {
-        if (arch->xai_FileInfo && arch->xai_FileInfo->xfi_Size == (xadSize)size) {
-            struct TagItem outTags[3] = {
-                {XAD_OUTMEMORY, (ULONG)destination},
-                {XAD_OUTSIZE,   (ULONG)size},
-                {TAG_DONE, 0}
-            };
-            ok = (xadFileUnArcA(arch, outTags) == XADERR_OK);
+    if (MediaConnectTagList(stream, 0, demuxer, 0, TAG_END)) {
+        uint8_t* ptr = destination;
+        uint32_t remaining = size;
+        while (remaining > 0) {
+            uint32_t chunk = remaining > 65536 ? 65536 : remaining;
+            QUAD result = DoMethod(demuxer, MMM_Pull, ptr, chunk);
+            if (result <= 0) break;
+            ptr += (uint32_t)result;
+            remaining -= (uint32_t)result;
         }
+        ok = (remaining == 0);
     }
 
-    xadFreeInfo(arch);
-    xadFreeObjectA(arch, NULL);
-    FreeVec(cbuf);
+    DisposeObject(demuxer);
+    CloseLibrary(gzBase);
+    DisposeObject(stream);
     return ok;
 }
 
@@ -464,10 +459,10 @@ void PlatformMorphOS::loadRawFile(const char* filename, uint8_t* destination, ui
         return;
     }
 
-    // Fallback: try .gz via XAD
+    // Fallback: try .gz via Reggae gzip.demuxer
     char gzPath[260];
     snprintf(gzPath, sizeof(gzPath), "%s.gz", filename);
-    if (xadDecodeFile(gzPath, destination, size)) return;
+    if (gzDecodeFile(gzPath, destination, size)) return;
 
     Write(Output(), unableToLoadData, strlen(unableToLoadData));
 }
@@ -481,10 +476,10 @@ uint32_t PlatformMorphOS::loadFile(const char* filename, uint8_t* destination, u
         if (bytesRead > 0) return bytesRead;
     }
 
-    // Fallback: try .gz via XAD
+    // Fallback: try .gz via Reggae gzip.demuxer
     char gzPath[260];
     snprintf(gzPath, sizeof(gzPath), "%s.gz", filename);
-    if (xadDecodeFile(gzPath, destination, size)) return size;
+    if (gzDecodeFile(gzPath, destination, size)) return size;
 
     Write(Output(), unableToLoadData, strlen(unableToLoadData));
     return 0;
